@@ -58,13 +58,20 @@ mask_over = (df_all['Product_description'].astype(str).str.len() > MAX_LEN) | \
 df_over = df_all[mask_over].copy()
 df_under = df_all[~mask_over].copy()
 
-df_under['Formatted'] = df_under.apply(
+# Format the under-29 DataFrame
+df_under['Product_description'] = df_under.apply(
     lambda row: pad_to_29(row['Product_description']) + pad_to_29(row['Product_description2']),
     axis=1
 )
 
-# Save results
-df_over.to_csv(OUTPUT_OVER, index=False)
-df_under.to_csv(OUTPUT_UNDER, index=False)
+# Keep only the required columns
+df_under = df_under[['Product_code', 'Product_description']]
+df_over = df_over[['Product_code', 'Product_description', 'Product_description2']]
 
-print(f"Done! {len(df_under)} rows → '{OUTPUT_UNDER}', {len(df_over)} rows → '{OUTPUT_OVER}'")
+
+# Save results
+df_over.to_csv(OUTPUT_OVER, index=False, encoding='utf-8-sig', sep=';')
+df_under.to_csv(OUTPUT_UNDER, index=False, encoding='utf-8-sig', sep=';')
+
+print(f"✅ Done! {len(df_under)} rows → '{OUTPUT_UNDER}', {len(df_over)} rows → '{OUTPUT_OVER}'")
+
