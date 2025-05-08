@@ -9,6 +9,8 @@ OUTPUT_UNDER = "under_29.csv"
 OUTPUT_TOTAL_UNDER = "total_under_29.csv"
 MAX_LEN = 29
 USE_COLUMNS = ['Product_code', 'Product_description', 'Product_description2']
+ENCODING = "utf-8-sig"
+DELIMITER = ";"
 
 # Padding to 29 characters
 def pad_to_29(text):
@@ -85,9 +87,9 @@ df_total_under = df_total_under[['Product_code', 'Product_description']]
 
 
 # Save results
-df_over.to_csv(OUTPUT_OVER, index=False, encoding='utf-8-sig', sep=';')
-df_under.to_csv(OUTPUT_UNDER, index=False, encoding='utf-8-sig', sep=';')
-df_total_under.to_csv(OUTPUT_TOTAL_UNDER, index=False, encoding='utf-8-sig', sep=';')
+df_over.to_csv(OUTPUT_OVER, index=False, sep=DELIMITER, encoding=ENCODING)
+df_under.to_csv(OUTPUT_UNDER, index=False, sep=DELIMITER, encoding=ENCODING)
+df_total_under.to_csv(OUTPUT_TOTAL_UNDER, index=False, sep=DELIMITER, encoding=ENCODING)
 
 print(f"Done! {len(df_total_under)} rows → '{OUTPUT_TOTAL_UNDER}', {len(df_under)} rows → '{OUTPUT_UNDER}', {len(df_over)} rows → '{OUTPUT_OVER}'")
 
