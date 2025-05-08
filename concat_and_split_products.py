@@ -6,6 +6,7 @@ from glob import glob
 INPUT_FOLDER = "input_csvs"
 OUTPUT_OVER = "over_29.csv"
 OUTPUT_UNDER = "under_29.csv"
+OUTPUT_TOTAL_UNDER = "total_under_29.csv"
 MAX_LEN = 29
 USE_COLUMNS = ['Product_code', 'Product_description', 'Product_description2']
 
@@ -55,8 +56,16 @@ df_all = pd.concat(frames, ignore_index=True)
 mask_over = (df_all['Product_description'].astype(str).str.len() > MAX_LEN) | \
             (df_all['Product_description2'].astype(str).str.len() > MAX_LEN)
 
+mask_total_under = (
+    df_all['Product_description'].astype(str).str.len() +
+    df_all['Product_description2'].astype(str).str.len()
+) < MAX_LEN
+
+mask_under = ~mask_over & ~mask_total_under
+
 df_over = df_all[mask_over].copy()
-df_under = df_all[~mask_over].copy()
+df_under = df_all[mask_under].copy()
+df_total_under = df_all[mask_total_under].copy()
 
 # Format the under-29 DataFrame
 df_under['Product_description'] = df_under.apply(
@@ -64,14 +73,21 @@ df_under['Product_description'] = df_under.apply(
     axis=1
 )
 
+df_total_under['Product_description'] = df_total_under.apply(
+    lambda row: (str(row['Product_description']) + ' ' + str(row['Product_description2'])).ljust(MAX_LEN),
+    axis=1
+)
+
 # Keep only the required columns
 df_under = df_under[['Product_code', 'Product_description']]
 df_over = df_over[['Product_code', 'Product_description', 'Product_description2']]
+df_total_under = df_total_under[['Product_code', 'Product_description']]
 
 
 # Save results
 df_over.to_csv(OUTPUT_OVER, index=False, encoding='utf-8-sig', sep=';')
 df_under.to_csv(OUTPUT_UNDER, index=False, encoding='utf-8-sig', sep=';')
+df_total_under.to_csv(OUTPUT_TOTAL_UNDER, index=False, encoding='utf-8-sig', sep=';')
 
-print(f"✅ Done! {len(df_under)} rows → '{OUTPUT_UNDER}', {len(df_over)} rows → '{OUTPUT_OVER}'")
+print(f"Done! {len(df_total_under)} rows → '{OUTPUT_TOTAL_UNDER}', {len(df_under)} rows → '{OUTPUT_UNDER}', {len(df_over)} rows → '{OUTPUT_OVER}'")
 
