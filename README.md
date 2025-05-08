@@ -97,6 +97,3 @@ python concat_and_split_products.py
 
 ---
 
-## 📬 Questions or Extensions?
-
-Want to sort the final output, export to Excel, or customize formatting rules? Open an issue or suggest a feature!
