@@ -1,11 +1,11 @@
 import pandas as pd
 import os
+import re
+import time
 from glob import glob
 from rapidfuzz import fuzz
 from sentence_transformers import SentenceTransformer, util
 from deep_translator import GoogleTranslator
-import time
-
 
 # Config
 INPUT_FOLDER = "input_csvs"
@@ -20,7 +20,8 @@ USE_COLUMNS = [
     'Product_code', 'Product_description', 'Product_description2',
     'Product_group_code', 'Supplier_origin', 'Supplier_note',
     'Product_unit', 'Product_unit_amount', 'Product_unit_default_amount',
-    'Product_unit_use_price_bit', 'Product_unit_use_stock_bit', 'Product_unit_use_sales_bit', 'Product_unit_use_purchase_bit',
+    'Product_unit_use_price_bit', 'Product_unit_use_stock_bit',
+    'Product_unit_use_sales_bit', 'Product_unit_use_purchase_bit',
     'Sales_account', 'Purchase_account',
     'Translate_language_code', 'Translate_product_description', 'Translate_product_description2',
     'Supplier_unit'
@@ -28,12 +29,57 @@ USE_COLUMNS = [
 
 model = SentenceTransformer('paraphrase-MiniLM-L6-v2')
 
-# Padding
+ACCEPTED_PATTERNS = [
+    "AISI316", "ASTM 420", "ASTM A-536", "ASTM A106", "ASTM A213",
+    "ASTM A312", "ASTM A333", "ASTM A335", "ASTM A403", "ASTM A420",
+    "ASTM A790", "ASTM SA516", "DIN 28011", "DIN 28013", "DIN 317",
+    "DIN 875", "DIN 934", "DIN 976B", "DIN10", "DIN11", "DIN12",
+    "DIN125", "DIN345N", "DIN6916-10", "DIN831", "DIN875", "DIN975",
+    "EN 1", "EN 10025", "EN 10028-2", "EN 10217-7", "EN 1092-1",
+    "EN 1514-1", "EN-F", "EN1", "EN10025", "EN10025-2", "EN10028-2",
+    "EN10028-3", "EN10028-7", "EN10088-10", "EN10088-11", "EN10088-12",
+    "EN10088-13", "EN10088-14", "EN10088-15", "EN10088-16", "EN10088-17",
+    "EN10088-18", "EN10088-19", "EN10088-2", "EN10088-20", "EN10088-21",
+    "EN10088-22", "EN10088-23", "EN10088-24", "EN10088-25", "EN10088-26",
+    "EN10088-27", "EN10088-28", "EN10088-29", "EN10088-3", "EN10088-30",
+    "EN10088-31", "EN10088-32", "EN10088-33", "EN10088-34", "EN10088-4",
+    "EN10088-5", "EN10088-6", "EN10088-7", "EN10088-8", "EN10088-9",
+    "EN10204", "EN10216-2", "EN10216-5", "EN10217-7", "EN10253-2",
+    "EN10253-2A", "EN10253-2B", "EN10253-4", "EN10272", "EN10277-2",
+    "EN1092-1", "EN13445", "EN1514-2", "ISO 7089", "SS 482", "SS 6",
+    "SS482", "SS483", "TP304", "TP304L", "TP316", "TP316L", "TP321",
+    "TP3501", "1.0254", "1.0305", "1.0405", "1.045", "1.0484", "1.0486",
+    "1.0566", "1.0582", "1.4301", "1.4306", "1.4307", "1.4401", "1.4404",
+    "1.4410", "1.4435", "1.4436", "1.4438", "1.4439", "1.4462", "1.4529",
+    "1.4539", "1.4541", "1.4547", "1.4550", "1.4571", "1.4903", "1.5145",
+    "1.5637", "1.6905", "1.7335", "1.7362", "1.7380", "1.8902", "1.8905",
+    "1.8972", "API 5L", "ASTM A 105", "ASTM A 106", "ASTM A 182", "ASTM A 234",
+    "ASTM A 312", "ASTM A 333", "ASTM A 350", "ASTM A 403", "ASTM A 53",
+    "ASTM A 694", "ASTM A 815", "DIN 2605", "DIN 2615", "DIN 2616", "DIN 2617",
+    "DIN 28011", "DIN 28013", "EN 10028-2", "EN 10028-7", "EN 10213-2",
+    "EN 10216-2", "EN 10216-5", "EN 10222-2", "EN 10222-4", "EN 10222-5",
+    "EN 10253-2", "EN 10253-4", "UNS S31803", "UNS S31803 (Duplex)",
+    "UNS S32205", "UNS S32750", "UNS S32750 (Superduplex)", "UNS S32760",
+    "P235TR1", "P235GH", "A53 Grade A", "S235JR", "S355J2", "A106 Grade A",
+    "13CrMo4-4", "13CrMo4-5", "A182 Grade F11", "10CrMo9-10", "11CrMo9-10",
+    "A182 Grade F22", "X10CrMoVNb9-1", "A182 Grade F91", "10Ni14", "12Ni14",
+    "A333 Grade 6", "15NiCuMoNb5-6-4", "P355NL1", "P265NL", "StE 285", "P355N",
+    "A694 Grade F52", "StE 420", "P420N", "A694 Grade F60", "StE 460", "P460N",
+    "A694 Grade F70", "L245NB", "L290NB", "L360NB", "L415NB", "X2CrNi18-9",
+    "TP304L", "X2CrNi19-11", "TP304", "X5CrNi18-10", "X6CrNiTi18-10", "TP321",
+    "X6CrNiNb18-10", "TP347", "X2CrNiMo17-12-2", "TP316L", "X5CrNiMo17-12-2",
+    "TP316", "X6CrNiMoTi17-12-2", "TP316Ti", "X6CrNiMoNb17-12-2", "TP316LN",
+    "X1NiCrMoCu25-20-5", "904L", "X1NiCrMoCuN25-20-7", "X2CrNiMoN22-5-3",
+    "X2CrNiMoN25-7-4", "P265GH", "P355GH", "P355NL2", "16Mo3", "F11", "F22",
+    "F91", "F52", "F60", "F70", 
+    r"[A-Z]{2,}\s?[A-Z0-9\-]+",     # generic
+    r"TP\d+[A-Z]*",                 # TP316L
+    r"\d+[\.,]\d+\s?[xX]\s?\d+[\.,]\d+", # 10.3 x 1.24
+    r"\([\dA-Za-z]+\)"            # (5S), etc.
+]
 
 def pad_to_29(text):
     return str(text).ljust(MAX_LEN)[:MAX_LEN]
-
-# CSV Reader
 
 def try_read_csv(file):
     try:
@@ -49,148 +95,129 @@ def try_read_csv(file):
         return None
 
     df.columns = df.columns.str.strip()
-    missing_cols = [col for col in USE_COLUMNS if col not in df.columns]
-    for col in missing_cols:
-        df[col] = pd.NA
-
-    if all(col in df.columns for col in USE_COLUMNS):
-        return df[USE_COLUMNS]
-    else:
-        print(f"[WARNING] Skipping {file}: missing required columns.")
-        return None
-
-# Load files
+    for c in USE_COLUMNS:
+        if c not in df.columns:
+            df[c] = pd.NA
+    return df[USE_COLUMNS]
 
 all_files = glob(os.path.join(INPUT_FOLDER, "*.csv"))
-frames = [try_read_csv(file) for file in all_files]
-frames = [df for df in frames if df is not None and not df.empty]
-
+frames = [df for f in all_files if (df := try_read_csv(f)) is not None]
 if not frames:
     raise RuntimeError("No valid CSV files found.")
 
-# Combine
-
 df_all = pd.concat(frames, ignore_index=True)
-
-# Duplicate Handling
 
 def are_fuzzy_similar(a, b, threshold=80):
     if not a or not b:
         return False
     return fuzz.partial_ratio(str(a).lower(), str(b).lower()) >= threshold
 
-
 def handle_duplicates(df):
-    dupes = df[df.duplicated(subset=['Product_code'], keep=False)]
-
+    dupes = df[df.duplicated(['Product_code'], keep=False)]
     if dupes.empty:
         return df
-
-    groups = dupes.groupby('Product_code')
-    rows_to_keep = []
-
-    for code, group in groups:
+    keep = []
+    for code, group in dupes.groupby('Product_code'):
         if len(group) == 2:
-            row1, row2 = group.iloc[0], group.iloc[1]
-
-            desc1, desc2 = str(row1['Product_description']), str(row2['Product_description'])
-            trans1, trans2 = str(row1['Translate_product_description']), str(row2['Translate_product_description'])
-
-            # Prefer if description matches translation
-            if are_fuzzy_similar(desc1, trans2) or are_fuzzy_similar(desc2, trans1):
-                rows_to_keep.append(row1.name)  # Keep first
-                print(f"[AUTO] Duplicate {code} auto-handled by translation match.")
+            r1, r2 = group.iloc[0], group.iloc[1]
+            if any(are_fuzzy_similar(x, y) for x, y in [
+                (r1['Product_description'], r2['Translate_product_description']),
+                (r2['Product_description'], r1['Translate_product_description']),
+                (r1['Product_description'], r2['Product_description'])
+            ]):
+                keep.append(r1.name)
                 continue
-
-            # If descriptions are very close
-            if are_fuzzy_similar(desc1, desc2):
-                rows_to_keep.append(row1.name)  # Keep first
-                print(f"[AUTO] Duplicate {code} auto-handled by description match.")
-                continue
-
-        # Manual decision
         print(f"\n[MANUAL] Duplicate for Product_code: {code}")
-        for idx, (_, row) in enumerate(group.iterrows(), start=1):
-            print(f"{idx}) Product_description: {row['Product_description']}, Product_description2: {row['Product_description2']}, Product_unit: {row['Product_unit']}")
-
-
-        valid = False
-        while not valid:
+        for i, (_, row) in enumerate(group.iterrows(), 1):
+            print(f"{i}) {row['Product_description']} / {row['Product_description2']}")
+        while True:
             choice = input("Which row to keep? (number): ").strip()
             if choice.isdigit() and 1 <= int(choice) <= len(group):
-                selected_idx = group.iloc[int(choice)-1].name
-                rows_to_keep.append(selected_idx)
-                valid = True
-            else:
-                print("Invalid choice. Try again.")
-
-    kept_dupes = df.loc[rows_to_keep].copy()
-    non_dupes = df[~df.index.isin(dupes.index)]
-    return pd.concat([non_dupes, kept_dupes], ignore_index=True)
-
-# Dedupe First!
+                keep.append(group.iloc[int(choice)-1].name)
+                break
+    kept = df.loc[keep]
+    return pd.concat([df.drop(dupes.index), kept], ignore_index=True)
 
 df_all = handle_duplicates(df_all)
 
-# Translation Phase
-
 def translate_missing(row):
     if pd.isna(row['Translate_product_description']) or not str(row['Translate_product_description']).strip():
-        text = str(row['Product_description'])
-        if len(text.strip()) > 2:
+        txt = str(row['Product_description']).strip()
+        if len(txt) > 2:
             try:
-                start_time = time.time()
-                translated = GoogleTranslator(source='fi', target='en').translate(text)
-                elapsed = time.time() - start_time
-                
-                if elapsed > 5:  # If it took too long (over 5 seconds)
-                    print(f"[WARNING] Translation too slow for text: '{text[:30]}...' (skipped)")
-                    return row
-
-                row['Translate_product_description'] = translated
-
-            except Exception as e:
-                print(f"[WARNING] Translation failed for text '{text[:30]}...': {e}")
-                # Simply leave the row unchanged
+                start = time.time()
+                tr = GoogleTranslator(source='fi', target='en').translate(txt)
+                if time.time() - start <= 5:
+                    row['Translate_product_description'] = tr
+            except:
+                pass
     return row
 
 df_all = df_all.apply(translate_missing, axis=1)
 
-# Split over/under
+def split_to_two(text):
+    text = re.sub(r'\s+', ' ', text).strip()
+    if len(text) <= MAX_LEN:
+        return [text.ljust(MAX_LEN)]
+    matches = []
+    for patt in ACCEPTED_PATTERNS:
+        for m in re.finditer(patt, text):
+            grp = m.group().strip()
+            if patt == r"[A-Z]{2,}\s?[A-Z0-9\-]+" and not any(ch.isdigit() for ch in grp):
+                continue
+            if m.start() > 0:
+                matches.append((m.start(), grp))
+    if matches:
+        start, _ = min(matches, key=lambda x: x[0])
+        part1 = text[:start].strip()
+        part2 = text[start:].strip()
+    else:
+        part1 = text[:MAX_LEN].strip()
+        part2 = text[MAX_LEN:].strip()
+    return [part1.ljust(MAX_LEN), part2.ljust(MAX_LEN)]
 
-mask_over = (df_all['Product_description'].astype(str).str.len() > MAX_LEN) | \
-            (df_all['Product_description2'].astype(str).str.len() > MAX_LEN)
-
+# Masks
+mask_over = (
+    df_all['Product_description'].astype(str).str.len() > MAX_LEN
+) | (
+    df_all['Product_description2'].astype(str).str.len() > MAX_LEN
+)
 mask_total_under = (
-    df_all['Product_description'].astype(str).str.len() +
-    df_all['Product_description2'].astype(str).str.len()
+    df_all['Product_description'].astype(str).str.len()
+    + df_all['Product_description2'].astype(str).str.len()
 ) < MAX_LEN
-
 mask_under = ~mask_over & ~mask_total_under
 
-
-# Prepare DataFrames
-
+# Over-limit: split into two 29-char fields
 df_over = df_all[mask_over].copy()
+df_over['Product_description'] = df_over.apply(
+    lambda r: ''.join(split_to_two(f"{r['Product_description']} {r['Product_description2']}")),
+    axis=1
+)
+df_over['Product_description2'] = pd.NA
+
+# Under-limit: pad each description separately
 df_under = df_all[mask_under].copy()
-df_total_under = df_all[mask_total_under].copy()
-
-
 df_under['Product_description'] = df_under.apply(
-    lambda row: pad_to_29(row['Product_description']) + pad_to_29(row['Product_description2']), axis=1)
+    lambda r: pad_to_29(r['Product_description']) + pad_to_29(r['Product_description2']),
+    axis=1
+)
 
+# Total under: merge and pad to a single 29-char field
+df_total_under = df_all[mask_total_under].copy()
 df_total_under['Product_description'] = df_total_under.apply(
-    lambda row: (str(row['Product_description']) + ' ' + str(row['Product_description2'])).ljust(MAX_LEN), axis=1)
+    lambda r: f"{r['Product_description']} {r['Product_description2']}".ljust(MAX_LEN),
+    axis=1
+)
 
-# Only keep output columns
-df_under = df_under[USE_COLUMNS]
-df_over = df_over[USE_COLUMNS]
-df_total_under = df_total_under[USE_COLUMNS]
+# Keep only the needed columns
+for df in (df_over, df_under, df_total_under):
+    df = df[USE_COLUMNS]
 
-# Save
-
+# Save results
 df_over.to_csv(OUTPUT_OVER, index=False, sep=DELIMITER, encoding=ENCODING)
 df_under.to_csv(OUTPUT_UNDER, index=False, sep=DELIMITER, encoding=ENCODING)
 df_total_under.to_csv(OUTPUT_TOTAL_UNDER, index=False, sep=DELIMITER, encoding=ENCODING)
 
-print(f"\n✅ Done! {len(df_total_under)} rows → '{OUTPUT_TOTAL_UNDER}', {len(df_under)} rows → '{OUTPUT_UNDER}', {len(df_over)} rows → '{OUTPUT_OVER}'")
+print(f"\n✅ Done! {len(df_total_under)} rows → '{OUTPUT_TOTAL_UNDER}', "
+      f"{len(df_under)} rows → '{OUTPUT_UNDER}', {len(df_over)} rows → '{OUTPUT_OVER}'")
