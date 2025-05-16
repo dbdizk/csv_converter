@@ -110,11 +110,12 @@ project_root/
 * rapidfuzz
 * sentence-transformers
 * deep-translator
+* chardet
 
 Install everything with:
 
 ```bash
-pip install pandas rapidfuzz sentence-transformers deep-translator
+pip install pandas rapidfuzz sentence-transformers deep-translator chardet
 ```
 
 ---
