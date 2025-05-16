@@ -12,9 +12,9 @@ INPUT_FOLDER = "input_csvs"
 OUTPUT_OVER = "over_29.csv"
 OUTPUT_UNDER = "under_29.csv"
 OUTPUT_TOTAL_UNDER = "total_under_29.csv"
-MAX_LEN = 29
 ENCODING = "utf-8-sig"
 DELIMITER = ";"
+MAX_LEN = 29
 
 USE_COLUMNS = [
     'Product_code', 'Product_description', 'Product_description2',
@@ -35,8 +35,8 @@ ACCEPTED_PATTERNS = [
     "ASTM A790", "ASTM SA516", "DIN 28011", "DIN 28013", "DIN 317",
     "DIN 875", "DIN 934", "DIN 976B", "DIN10", "DIN11", "DIN12",
     "DIN125", "DIN345N", "DIN6916-10", "DIN831", "DIN875", "DIN975",
-    "EN 1", "EN 10025", "EN 10028-2", "EN 10217-7", "EN 1092-1",
-    "EN 1514-1", "EN-F", "EN1", "EN10025", "EN10025-2", "EN10028-2",
+    "EN 10025", "EN 10028-2", "EN 10217-7", "EN 1092-1",
+    "EN 1514-1", "EN-F", "EN10025", "EN10025-2", "EN10028-2",
     "EN10028-3", "EN10028-7", "EN10088-10", "EN10088-11", "EN10088-12",
     "EN10088-13", "EN10088-14", "EN10088-15", "EN10088-16", "EN10088-17",
     "EN10088-18", "EN10088-19", "EN10088-2", "EN10088-20", "EN10088-21",
@@ -100,13 +100,6 @@ def try_read_csv(file):
             df[c] = pd.NA
     return df[USE_COLUMNS]
 
-all_files = glob(os.path.join(INPUT_FOLDER, "*.csv"))
-frames = [df for f in all_files if (df := try_read_csv(f)) is not None]
-if not frames:
-    raise RuntimeError("No valid CSV files found.")
-
-df_all = pd.concat(frames, ignore_index=True)
-
 def are_fuzzy_similar(a, b, threshold=80):
     if not a or not b:
         return False
@@ -138,8 +131,6 @@ def handle_duplicates(df):
     kept = df.loc[keep]
     return pd.concat([df.drop(dupes.index), kept], ignore_index=True)
 
-df_all = handle_duplicates(df_all)
-
 def translate_missing(row):
     if pd.isna(row['Translate_product_description']) or not str(row['Translate_product_description']).strip():
         txt = str(row['Product_description']).strip()
@@ -153,30 +144,94 @@ def translate_missing(row):
                 pass
     return row
 
+def split_over29_rows(df_over):
+    def split_to_two_parts(text):
+        text = re.sub(r'\s+', ' ', text).strip()
+        if len(text) <= MAX_LEN:
+            return (text, "")
+
+        matches = []
+        for patt in ACCEPTED_PATTERNS:
+            for m in re.finditer(patt, text):
+                grp = m.group().strip()
+                if patt == r"[A-Z]{2,}\s?[A-Z0-9\-]+" and not any(ch.isdigit() for ch in grp):
+                    continue
+                matches.append((m.start(), m.end(), grp))
+
+        split_idx = MAX_LEN
+        if matches:
+            _, end, _ = min(matches, key=lambda x: x[0])
+            split_idx = end
+
+        # Move forward to next space
+        while split_idx < len(text) and text[split_idx] != ' ':
+            split_idx += 1
+        if split_idx >= len(text) - 1:
+            print(f"[fallback split] No space found after pattern in: '{text}'")
+            return (text, "")
+
+        split_idx += 1
+        part1 = text[:split_idx].strip()
+        part2 = text[split_idx:].strip()
+
+        if len(part1) <= MAX_LEN and len(part2) <= MAX_LEN:
+            return (part1, part2)
+
+        print(f"[fallback split] Post-pattern split failed length check in: '{text}'")
+        return (text, "")
+
+    split_parts = df_over.apply(
+        lambda r: split_to_two_parts(f"{r['Product_description']} {r['Product_description2']}"),
+        axis=1, result_type='expand'
+    )
+    df_over['part1'] = split_parts[0]
+    df_over['part2'] = split_parts[1]
+
+    mask_second_under = (
+        df_over['part1'].str.len() <= MAX_LEN
+    ) & (
+        df_over['part2'].str.len() <= MAX_LEN
+    ) & (
+        df_over['part2'].str.len() > 0
+    )
+
+    df_second_under = df_over[mask_second_under].copy()
+    df_second_over = df_over[~mask_second_under].copy()
+
+    df_second_under['Product_description'] = (
+        df_second_under['part1'].apply(pad_to_29) +
+        df_second_under['part2'].apply(pad_to_29)
+    )
+    df_second_under['Product_description2'] = pd.NA
+
+    df_second_over['Product_description'] = (
+        (df_second_over['part1'] + ' ' + df_second_over['part2'])
+        .str.replace(r'\s+', ' ', regex=True)
+        .str.strip()
+        .str.ljust(MAX_LEN)
+    )
+    df_second_over['Product_description2'] = pd.NA
+
+    df_second_under = df_second_under[USE_COLUMNS]
+    df_second_over = df_second_over[USE_COLUMNS]
+
+    df_second_under.to_csv("second_part_under_29.csv", index=False, sep=DELIMITER, encoding=ENCODING)
+    df_second_over.to_csv(OUTPUT_OVER, index=False, sep=DELIMITER, encoding=ENCODING)
+
+    print(f"\n✅ Split 'over 29' rows: {len(df_second_under)} to 'second_part_under_29.csv', "
+          f"{len(df_second_over)} remaining in '{OUTPUT_OVER}'")
+
+# === Execution ===
+all_files = glob(os.path.join(INPUT_FOLDER, "*.csv"))
+frames = [df for f in all_files if (df := try_read_csv(f)) is not None]
+if not frames:
+    raise RuntimeError("No valid CSV files found.")
+
+df_all = pd.concat(frames, ignore_index=True)
+
+df_all = handle_duplicates(df_all)
 df_all = df_all.apply(translate_missing, axis=1)
 
-def split_to_two(text):
-    text = re.sub(r'\s+', ' ', text).strip()
-    if len(text) <= MAX_LEN:
-        return [text.ljust(MAX_LEN)]
-    matches = []
-    for patt in ACCEPTED_PATTERNS:
-        for m in re.finditer(patt, text):
-            grp = m.group().strip()
-            if patt == r"[A-Z]{2,}\s?[A-Z0-9\-]+" and not any(ch.isdigit() for ch in grp):
-                continue
-            if m.start() > 0:
-                matches.append((m.start(), grp))
-    if matches:
-        start, _ = min(matches, key=lambda x: x[0])
-        part1 = text[:start].strip()
-        part2 = text[start:].strip()
-    else:
-        part1 = text[:MAX_LEN].strip()
-        part2 = text[MAX_LEN:].strip()
-    return [part1.ljust(MAX_LEN), part2.ljust(MAX_LEN)]
-
-# Masks
 mask_over = (
     df_all['Product_description'].astype(str).str.len() > MAX_LEN
 ) | (
@@ -188,36 +243,28 @@ mask_total_under = (
 ) < MAX_LEN
 mask_under = ~mask_over & ~mask_total_under
 
-# Over-limit: split into two 29-char fields
 df_over = df_all[mask_over].copy()
-df_over['Product_description'] = df_over.apply(
-    lambda r: ''.join(split_to_two(f"{r['Product_description']} {r['Product_description2']}")),
-    axis=1
-)
-df_over['Product_description2'] = pd.NA
+split_over29_rows(df_over)
 
-# Under-limit: pad each description separately
 df_under = df_all[mask_under].copy()
 df_under['Product_description'] = df_under.apply(
     lambda r: pad_to_29(r['Product_description']) + pad_to_29(r['Product_description2']),
     axis=1
 )
+df_under['Product_description2'] = pd.NA
 
-# Total under: merge and pad to a single 29-char field
 df_total_under = df_all[mask_total_under].copy()
 df_total_under['Product_description'] = df_total_under.apply(
-    lambda r: f"{r['Product_description']} {r['Product_description2']}".ljust(MAX_LEN),
+    lambda r: f"{r['Product_description']} {r['Product_description2']}".strip().ljust(MAX_LEN),
     axis=1
 )
+df_total_under['Product_description2'] = pd.NA
 
-# Keep only the needed columns
-for df in (df_over, df_under, df_total_under):
+for df in (df_under, df_total_under):
     df = df[USE_COLUMNS]
 
-# Save results
-df_over.to_csv(OUTPUT_OVER, index=False, sep=DELIMITER, encoding=ENCODING)
 df_under.to_csv(OUTPUT_UNDER, index=False, sep=DELIMITER, encoding=ENCODING)
 df_total_under.to_csv(OUTPUT_TOTAL_UNDER, index=False, sep=DELIMITER, encoding=ENCODING)
 
 print(f"\n✅ Done! {len(df_total_under)} rows → '{OUTPUT_TOTAL_UNDER}', "
-      f"{len(df_under)} rows → '{OUTPUT_UNDER}', {len(df_over)} rows → '{OUTPUT_OVER}'")
+      f"{len(df_under)} rows → '{OUTPUT_UNDER}'")
